@@ -75,7 +75,11 @@ export class Max4Node {
 
   private incommingMessages = new Subject<ReturnMessage>();
 
-  private pathToCallback = new Map<string, Set<string>>();
+
+  private callbacks = new Set<string>();
+
+  // private pathToCallback = new Map<string, Set<string>>();
+
 
   public bind(ports: Ports = {}): void {
     ports.send = ports.send || 9000;
@@ -83,6 +87,7 @@ export class Max4Node {
     this.ports = ports;
     this.read = this.createInputSocket(ports.receive);
     this.write = createSocket('udp4');
+
   }
 
   private createInputSocket(port: number): Socket {
@@ -144,31 +149,29 @@ export class Max4Node {
   }
 
   private observerEmitter(msg: Message, action: string): Observable<any> {
+
     const middle = action === 'call' ? msg.method : msg.property;
     const pathHash = `${action} ${msg.path} ${middle}`;
 
-    const callback = this.callbackHash();
+    const callback = action === 'observe' ? pathHash : this.callbackHash();
     const args = [msg.path, middle, callback];
 
-    if (!this.pathToCallback.has(pathHash)) {
-      console.log(action, pathHash)
-      this.pathToCallback.set(pathHash, new Set<string>());
+    if (!this.callbacks.has(callback)) {
+      this.callbacks.add(callback);
       this.send_message(action, args);
     }
 
-    if (action == 'call') {
-      this.send_message(action, args);
-    }
-
-    this.pathToCallback.get(pathHash)!.add(callback);
-    console.log(pathHash, this.pathToCallback.get(pathHash))
 
     return this.incommingMessages.pipe(
-      filter((x) => this.pathToCallback.get(pathHash).has(x.callback)),
+      filter((x) => x.callback === callback),
       map((x) => x.value),
       finalize(() => {
-        this.pathToCallback.get(pathHash)!.delete(callback);
-      }),
+        if (action === 'observe') {
+          return
+        }
+        this.callbacks.delete(callback);
+      })
+
     );
   }
 
@@ -185,7 +188,7 @@ export class Max4Node {
     this.send_message('set', args);
   }
 
-  public call(msg: CallArgs, timeoutMs = 1000): Promise<any> {
+  public call(msg: CallArgs, timeoutMs = 5000): Promise<any> {
     return firstValueFrom(this.observerEmitter(msg, 'call').pipe(
       timeout({ first: timeoutMs }),
       take(1)));
@@ -200,7 +203,7 @@ export class Max4Node {
   }
 
   public reset(): void {
-    this.pathToCallback.clear();
+    this.callbacks.clear();
   }
 
   public set_field({

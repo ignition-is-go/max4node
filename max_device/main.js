@@ -39,7 +39,7 @@ var sidecar_pong = 0;
 
 function ping() {
   outlet(0, '/ping', ++sidecar_sequence);
-  log('ping', sidecar_sequence);
+  // log('ping', sidecar_sequence);
   me.message('getstate');
   if (sidecar_sequence - sidecar_pong > 1) {
     setSidecarStatus(false);
@@ -53,7 +53,8 @@ function ping() {
 
 var isReady = false,
   actions = {},
-  apis = {};
+  apis = {},
+  observers = {};
 
 function get(action) {
   var json = Array.prototype.slice.call(arguments);
@@ -62,14 +63,14 @@ function get(action) {
 
   if (action === '/pong') {
     setSidecarStatus(true);
-    log('pong', arguments[1]);
+    // log('pong', arguments[1]);
     sidecar_pong = parseInt(arguments[1]);
     return;
   }
   if (action === '/set_field') {
     const field = arguments[1];
     const value = arguments[2];
-    log('set_field', field, value);
+    // log('set_field', field, value);
     if (field == 'rs_ping') {
       rship_latency.message('set', value);
     }
@@ -88,7 +89,7 @@ function get(action) {
 }
 
 function on(a) {
-  log('device on', a);
+  // log('device on', a);
   isReady = a === 1;
 }
 
@@ -126,9 +127,11 @@ actions['observe'] = function (obj) {
     property = obj[1],
     callback = obj[2];
 
-  var handler = handleCallbacks(callback);
+  var handler = handleCallbacks(callback, path);
   var api = new LiveAPI(handler, path);
   api.property = property;
+  api.mode = 1;
+  observers[path + property] = api;
 };
 
 actions['count'] = function (obj) {
@@ -149,27 +152,31 @@ function getApi(path) {
   return apis[path];
 }
 
-function handleCallbacks(callback) {
+function handleCallbacks(callback, path) {
   return function (value) {
+    log('handle callback', path, value);
     outlet(1, 'bang');
     outlet(0, '/_observer_reply', callback, value);
   };
 }
 
 function log() {
-  for (var i = 0, len = arguments.length; i < len; i++) {
-    var message = arguments[i];
-    if (message && message.toString) {
-      var s = message.toString();
-      if (s.indexOf('[object ') >= 0) {
-        s = JSON.stringify(message);
-      }
-      post(s);
-    } else if (message === null) {
-      post('<null>');
-    } else {
-      post(message);
-    }
+  for (var i = 0; i < arguments.length; i++) {
+    post(arguments[i]);
   }
+  // for (var i = 0, len = arguments.length; i < len; i++) {
+  //   var message = arguments[i];
+  //   if (message && message.toString) {
+  //     var s = message.toString();
+  //     if (s.indexOf('[object ') >= 0) {
+  //       s = JSON.stringify(message);
+  //     }
+  //     post(s);
+  //   } else if (message === null) {
+  //     post('<null>');
+  //   } else {
+  //     post(message);
+  //   }
+  // }
   post('\n');
 }
