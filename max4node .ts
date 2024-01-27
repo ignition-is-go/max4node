@@ -1,8 +1,18 @@
 import { createSocket, Socket } from 'dgram';
-import { EventEmitter } from 'events';
 import * as osc from 'osc-min';
-import { resolve as pathResolve } from 'path';
-import { firstValueFrom, Observable, ReplaySubject, Subject, take } from 'rxjs';
+import {
+  delay,
+  filter,
+  finalize,
+  firstValueFrom,
+  map,
+  Observable,
+  ReplaySubject,
+  Subject,
+  take,
+  tap,
+  timeout,
+} from 'rxjs';
 
 type Ports = {
   send?: number;
@@ -16,16 +26,56 @@ type Message = {
   method?: string;
 };
 
+type ObserveArgs = {
+  path: string;
+  property: string;
+};
+
+type CallArgs = {
+  path: string;
+  method: string;
+};
+
+type GetArgs = {
+  path: string;
+  property: string;
+};
+
+type CountArgs = {
+  path: string;
+  property: string;
+};
+
+type SetArgs = {
+  path: string;
+  property: string;
+  value: any;
+};
+
+type ReturnMessageBase = {
+  callback: string;
+  value: any;
+};
+
+type ReturnMessage =
+  | (ReturnMessageBase & {
+    is_get_reply: true;
+  })
+  | (ReturnMessageBase & {
+    is_observer_reply: true;
+  })
+  | (ReturnMessageBase & {
+    is_call_reply: true;
+  });
+
 export class Max4Node {
   private read: Socket | null = null;
   private write: Socket | null = null;
   private ports: Ports = {};
-  private emitters: Record<string, Subject<any>> = {};
-  private promisedFn?: {
-    get: typeof promiseMessage;
-    count: typeof promiseMessage;
-  };
-  private callReturns: Record<string, (value: any) => void> = {};
+
+  private incommingMessages = new Subject<ReturnMessage>();
+
+  private pathToCallback = new Map<string, Set<string>>();
 
   public bind(ports: Ports = {}): void {
     ports.send = ports.send || 9000;
@@ -39,47 +89,50 @@ export class Max4Node {
     const socket = createSocket('udp4');
     socket.bind(port);
     socket.on('message', (msg, rinfo) => {
-      const obj = this.parseMessage(msg);
-      if (obj.is_get_reply || obj.is_observer_reply) {
-        try {
-          this.emitters[obj.callback].next(obj.value);
-        } catch (err) {
-          console.error(err);
-        }
-      }
-      if (obj.is_get_reply) {
-        delete this.emitters[obj.callback];
-      }
-      if (obj.is_call_reply) {
-        this.callReturns[obj.callback](obj.value);
-        delete this.callReturns[obj.callback];
-      }
+      this.handleMessage(msg);
+
     });
     return socket;
   }
 
-  private parseMessage(msg: Buffer): any {
+  private handleMessage(msg: Buffer) {
     const obj = osc.fromBuffer(msg);
+
+
     const args = obj.args.map((item: any) => item.value);
-    // console.log('parseMessage', obj);
     switch (obj.address) {
       case '/_get_reply':
-        obj.is_get_reply = true;
-        obj.callback = args[0];
-        obj.value = args[1];
-        break;
+        const get_reply = {
+          is_get_reply: true,
+          callback: args[0],
+          value: args[1],
+        } as ReturnMessage;
+        this.incommingMessages.next(get_reply);
+        return;
       case '/_observer_reply':
-        obj.is_observer_reply = true;
-        obj.callback = args[0];
-        obj.value = args.slice(2);
-        break;
+        const obs_reply = {
+          is_observer_reply: true,
+          callback: args[0],
+          value: args.slice(2),
+        } as ReturnMessage;
+        this.incommingMessages.next(obs_reply);
+        return;
       case '/_call_reply':
-        obj.is_call_reply = true;
-        obj.callback = args[0];
-        obj.value = args.slice(1);
+        const call_reply = {
+          is_call_reply: true,
+          callback: args[0],
+          value: args.slice(1),
+        } as ReturnMessage;
+        this.incommingMessages.next(call_reply);
+        return;
+      case '/ping':
+        this.send_message('pong', obj.args[0].value);
         break;
+
+      default:
+        console.log(obj)
+        throw new Error('Unknown message type');
     }
-    return obj;
   }
 
   public send_message(address: string, args: any[]): void {
@@ -90,76 +143,75 @@ export class Max4Node {
     this.write!.send(buf, 0, buf.length, this.ports.send!, 'localhost');
   }
 
-  private observerEmitter(
-    msg: Message,
-    action: string = 'observe',
-  ): Observable<any> {
-    const emitter = new ReplaySubject(1);
+  private observerEmitter(msg: Message, action: string): Observable<any> {
+    const middle = action === 'call' ? msg.method : msg.property;
+    const pathHash = `${action} ${msg.path} ${middle}`;
+
     const callback = this.callbackHash();
-    this.emitters[callback] = emitter;
-    const args = [msg.path, msg.property, callback];
-    this.send_message(action, args);
-    return emitter;
+    const args = [msg.path, middle, callback];
+
+    if (!this.pathToCallback.has(pathHash)) {
+      console.log(action, pathHash)
+      this.pathToCallback.set(pathHash, new Set<string>());
+      this.send_message(action, args);
+    }
+
+    if (action == 'call') {
+      this.send_message(action, args);
+    }
+
+    this.pathToCallback.get(pathHash)!.add(callback);
+    console.log(pathHash, this.pathToCallback.get(pathHash))
+
+    return this.incommingMessages.pipe(
+      filter((x) => this.pathToCallback.get(pathHash).has(x.callback)),
+      map((x) => x.value),
+      finalize(() => {
+        this.pathToCallback.get(pathHash)!.delete(callback);
+      }),
+    );
   }
 
   private callbackHash(): string {
     return new Date().getTime().toString() + Math.random().toString();
   }
 
-  public get(msg: Message): Promise<any> {
+  public get(msg: GetArgs): Promise<any> {
     return firstValueFrom(this.observerEmitter(msg, 'get').pipe(take(1)));
   }
 
-  public set(msg: Message): void {
+  public set(msg: SetArgs): void {
     const args = [msg.path, msg.property, msg.value];
     this.send_message('set', args);
   }
 
-  public call(msg: Message, timeout = 500): Promise<any> {
-    const id = this.callbackHash();
-    const args = [msg.path, msg.method, id];
-    this.send_message('call', args);
-    return new Promise((resolve, reject) => {
-      const t = setTimeout(reject, timeout);
-      this.callReturns[id] = (v) => {
-        clearTimeout(t);
-        resolve(v);
-      };
-    });
+  public call(msg: CallArgs, timeoutMs = 1000): Promise<any> {
+    return firstValueFrom(this.observerEmitter(msg, 'call').pipe(
+      timeout({ first: timeoutMs }),
+      take(1)));
   }
 
-  public observe(msg: Message): Observable<any> {
+  public observe(msg: ObserveArgs): Observable<any> {
     return this.observerEmitter(msg, 'observe');
   }
 
-  public count(msg: Message): Observable<any> {
+  public count(msg: CountArgs): Observable<any> {
     return this.observerEmitter(msg, 'count');
   }
 
-  public promise(): {
-    get: typeof promiseMessage;
-    count: typeof promiseMessage;
-  } {
-    if (this.promisedFn) {
-      return this.promisedFn;
-    }
-    return (this.promisedFn = {
-      get: promiseMessage.bind(this, 'get'),
-      count: promiseMessage.bind(this, 'count'),
-    });
+  public reset(): void {
+    this.pathToCallback.clear();
   }
-}
 
-function promiseMessage(
-  this: Max4Node,
-  method: 'get' | 'count',
-  msg: Message,
-): Promise<any> {
-  const emitter = this[method](msg);
-  if (emitter instanceof Promise) {
-    return emitter;
+  public set_field({
+    field,
+    value
+  }: {
+    field: string,
+    value: any,
+  }) {
+    this.send_message('set_field', [field, value])
   }
-  return firstValueFrom(emitter);
 }
 
 export default Max4Node;
