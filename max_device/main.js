@@ -155,7 +155,7 @@ function getApi(path) {
 function handleCallbacks(callback, path) {
   return function (value) {
     log('handle callback', path, value);
-    outlet(1, 'bang');
+    // outlet(1, 'bang');
     outlet(0, '/_observer_reply', callback, value);
   };
 }

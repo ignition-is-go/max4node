@@ -1,5 +1,6 @@
 import { createSocket, Socket } from 'dgram';
 import * as osc from 'osc-min';
+import path = require('path');
 import {
   delay,
   filter,
@@ -59,14 +60,14 @@ type ReturnMessageBase = {
 
 type ReturnMessage =
   | (ReturnMessageBase & {
-    is_get_reply: true;
-  })
+      is_get_reply: true;
+    })
   | (ReturnMessageBase & {
-    is_observer_reply: true;
-  })
+      is_observer_reply: true;
+    })
   | (ReturnMessageBase & {
-    is_call_reply: true;
-  });
+      is_call_reply: true;
+    });
 
 export class Max4Node {
   private read: Socket | null = null;
@@ -75,11 +76,9 @@ export class Max4Node {
 
   private incommingMessages = new Subject<ReturnMessage>();
 
-
   private callbacks = new Set<string>();
 
   // private pathToCallback = new Map<string, Set<string>>();
-
 
   public bind(ports: Ports = {}): void {
     ports.send = ports.send || 9000;
@@ -87,7 +86,6 @@ export class Max4Node {
     this.ports = ports;
     this.read = this.createInputSocket(ports.receive);
     this.write = createSocket('udp4');
-
   }
 
   private createInputSocket(port: number): Socket {
@@ -95,14 +93,12 @@ export class Max4Node {
     socket.bind(port);
     socket.on('message', (msg, rinfo) => {
       this.handleMessage(msg);
-
     });
     return socket;
   }
 
   private handleMessage(msg: Buffer) {
     const obj = osc.fromBuffer(msg);
-
 
     const args = obj.args.map((item: any) => item.value);
     switch (obj.address) {
@@ -115,6 +111,11 @@ export class Max4Node {
         this.incommingMessages.next(get_reply);
         return;
       case '/_observer_reply':
+        // console.log(obj)
+        if (args[1] === 'id') {
+          break;
+        }
+
         const obs_reply = {
           is_observer_reply: true,
           callback: args[0],
@@ -135,7 +136,7 @@ export class Max4Node {
         break;
 
       default:
-        console.log(obj)
+        console.log(obj);
         throw new Error('Unknown message type');
     }
   }
@@ -149,7 +150,6 @@ export class Max4Node {
   }
 
   private observerEmitter(msg: Message, action: string): Observable<any> {
-
     const middle = action === 'call' ? msg.method : msg.property;
     const pathHash = `${action} ${msg.path} ${middle}`;
 
@@ -161,17 +161,15 @@ export class Max4Node {
       this.send_message(action, args);
     }
 
-
     return this.incommingMessages.pipe(
       filter((x) => x.callback === callback),
       map((x) => x.value),
       finalize(() => {
         if (action === 'observe') {
-          return
+          return;
         }
         this.callbacks.delete(callback);
-      })
-
+      }),
     );
   }
 
@@ -188,10 +186,8 @@ export class Max4Node {
     this.send_message('set', args);
   }
 
-  public call(msg: CallArgs, timeoutMs = 5000): Promise<any> {
-    return firstValueFrom(this.observerEmitter(msg, 'call').pipe(
-      timeout({ first: timeoutMs }),
-      take(1)));
+  public call(msg: CallArgs): Promise<any> {
+    return firstValueFrom(this.observerEmitter(msg, 'call').pipe(take(1)));
   }
 
   public observe(msg: ObserveArgs): Observable<any> {
@@ -206,14 +202,8 @@ export class Max4Node {
     this.callbacks.clear();
   }
 
-  public set_field({
-    field,
-    value
-  }: {
-    field: string,
-    value: any,
-  }) {
-    this.send_message('set_field', [field, value])
+  public set_field({ field, value }: { field: string; value: any }) {
+    this.send_message('set_field', [field, value]);
   }
 }
 
