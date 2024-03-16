@@ -1,1 +1,1 @@
-export * from './max4node ';
+export * from './max4node'
