@@ -72,6 +72,7 @@ export class Max4Node {
   private incommingMessages = new Subject<ReturnMessage>()
 
   private callbacks = new Set<string>()
+  private serviceId$ = new Subject<string>()
 
   // private pathToCallback = new Map<string, Set<string>>();
 
@@ -90,6 +91,10 @@ export class Max4Node {
       this.handleMessage(msg)
     })
     return socket
+  }
+
+  public watchServiceId() {
+    return this.serviceId$.asObservable()
   }
 
   private handleMessage(msg: Buffer) {
@@ -129,7 +134,10 @@ export class Max4Node {
       case '/ping':
         this.send_message('pong', obj.args[0].value)
         break
-
+      case '/_service_id':
+        // console.log('service id:', obj.args[0].value)
+        this.serviceId$.next(obj.args[0].value)
+        break
       default:
         console.log(obj)
         throw new Error('Unknown message type')

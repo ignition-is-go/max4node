@@ -1,13 +1,13 @@
 outlets = 2;
 
-var sidecar_led = this.patcher.getnamed('sidecar_led');
-var rship_led = this.patcher.getnamed('rship_led');
-var rship_latency = this.patcher.getnamed('rshiplatency');
-var me = this.patcher.getnamed('devicestatus');
-var ableton_targets = this.patcher.getnamed('ableton_targets');
+var sidecar_led = this.patcher.getnamed("sidecar_led");
+var rship_led = this.patcher.getnamed("rship_led");
+var rship_latency = this.patcher.getnamed("rshiplatency");
+var me = this.patcher.getnamed("devicestatus");
+// var ableton_targets = this.patcher.getnamed("ableton_targets");
 
 function setBackgroundColor(el, r, g, b) {
-  el.message('offcolor', r, g, b);
+  el.message("offcolor", r, g, b);
 }
 
 function setLedGreen(el) {
@@ -34,21 +34,30 @@ function setSidecarStatus(online) {
   }
 }
 
+var service_listener = new ParameterListener("rship_service", getServiceId);
+
+function getServiceId() {
+  var id = service_listener.getvalue();
+  // log("Got Service ID", id);
+  return id;
+}
+
 var sidecar_sequence = 0;
 var sidecar_pong = 0;
 
 function ping() {
-  outlet(0, '/ping', ++sidecar_sequence);
+  outlet(0, "/ping", ++sidecar_sequence);
   // log('ping', sidecar_sequence);
-  me.message('getstate');
+  me.message("getstate");
   if (sidecar_sequence - sidecar_pong > 1) {
     setSidecarStatus(false);
     setRshipStatus(false);
-    rship_latency.message('set');
-    ableton_targets.message('set');
+    rship_latency.message("set");
+    // ableton_targets.message("set");
   } else {
     setSidecarStatus(true);
   }
+  outlet(0, "/_service_id", getServiceId());
 }
 
 var isReady = false,
@@ -61,25 +70,25 @@ function get(action) {
 
   json = json.slice(1);
 
-  if (action === '/pong') {
+  if (action === "/pong") {
     setSidecarStatus(true);
     // log('pong', arguments[1]);
     sidecar_pong = parseInt(arguments[1]);
     return;
   }
-  if (action === '/set_field') {
+  if (action === "/set_field") {
     const field = arguments[1];
     const value = arguments[2];
     // log('set_field', field, value);
-    if (field == 'rs_ping') {
-      rship_latency.message('set', value);
+    if (field == "rs_ping") {
+      rship_latency.message("set", value);
     }
-    if (field == 'rs_online') {
+    if (field == "rs_online") {
       setRshipStatus(value === 1);
     }
-    if (field === 'rs_targets') {
-      ableton_targets.message('set', value);
-    }
+    // if (field === "rs_targets") {
+    //   ableton_targets.message("set", value);
+    // }
 
     return;
   }
@@ -93,17 +102,17 @@ function on(a) {
   isReady = a === 1;
 }
 
-actions['get'] = function (obj) {
+actions["get"] = function (obj) {
   var path = obj[0],
     property = obj[1],
     callback = obj[2];
 
   var api = getApi(path);
-  outlet(1, 'bang');
-  outlet(0, '/_get_reply', callback, api.get(property));
+  outlet(1, "bang");
+  outlet(0, "/_get_reply", callback, api.get(property));
 };
 
-actions['set'] = function (obj) {
+actions["set"] = function (obj) {
   var path = obj[0],
     property = obj[1],
     value = obj[2];
@@ -112,17 +121,17 @@ actions['set'] = function (obj) {
   api.set(property, value);
 };
 
-actions['call'] = function (obj) {
+actions["call"] = function (obj) {
   var path = obj[0],
     method = obj[1],
     callback = obj[2];
   var api = getApi(path);
 
-  outlet(1, 'bang');
-  outlet(0, '/_call_reply', callback, api.call(method));
+  outlet(1, "bang");
+  outlet(0, "/_call_reply", callback, api.call(method));
 };
 
-actions['observe'] = function (obj) {
+actions["observe"] = function (obj) {
   var path = obj[0],
     property = obj[1],
     callback = obj[2];
@@ -134,15 +143,15 @@ actions['observe'] = function (obj) {
   observers[path + property] = api;
 };
 
-actions['count'] = function (obj) {
+actions["count"] = function (obj) {
   var path = obj[0],
     property = obj[1],
     callback = obj[2];
 
   var api = getApi(path);
 
-  outlet(1, 'bang');
-  outlet(0, '/_get_reply', callback, api.getcount(property));
+  outlet(1, "bang");
+  outlet(0, "/_get_reply", callback, api.getcount(property));
 };
 
 function getApi(path) {
@@ -154,9 +163,9 @@ function getApi(path) {
 
 function handleCallbacks(callback, path) {
   return function (value) {
-    log('handle callback', path, value);
+    log("handle callback", path, value);
     // outlet(1, 'bang');
-    outlet(0, '/_observer_reply', callback, value);
+    outlet(0, "/_observer_reply", callback, value);
   };
 }
 
@@ -178,5 +187,5 @@ function log() {
   //     post(message);
   //   }
   // }
-  post('\n');
+  post("\n");
 }
