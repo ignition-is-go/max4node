@@ -106,7 +106,7 @@ export class Max4Node {
         const get_reply = {
           is_get_reply: true,
           callback: args[0],
-          value: args[1],
+          value: args.slice(1),
         } as ReturnMessage
         this.incommingMessages.next(get_reply)
         return
@@ -135,7 +135,7 @@ export class Max4Node {
         this.send_message('pong', obj.args[0].value)
         break
       case '/_service_id':
-        // console.log('service id:', obj.args[0].value)
+        console.log('service id:', obj.args[0].value)
         this.serviceId$.next(obj.args[0].value)
         break
       default:
