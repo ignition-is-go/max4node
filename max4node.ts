@@ -45,7 +45,7 @@ type CountArgs = {
 type SetArgs = {
   path: string
   property: string
-  value: any
+  value: number
 }
 
 type ReturnMessageBase = {
@@ -135,7 +135,7 @@ export class Max4Node {
         this.send_message('pong', obj.args[0].value)
         break
       case '/_service_id':
-        console.log('service id:', obj.args[0].value)
+        // console.log('service id:', obj.args[0].value)
         this.serviceId$.next(obj.args[0].value)
         break
       default:
