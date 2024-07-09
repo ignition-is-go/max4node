@@ -1,5 +1,6 @@
 import { createSocket, Socket } from 'dgram'
 import * as osc from 'osc-min'
+import { send } from 'process'
 import {
   filter,
   finalize,
@@ -7,6 +8,7 @@ import {
   map,
   Observable,
   Subject,
+  scan,
   take,
 } from 'rxjs'
 
@@ -55,21 +57,45 @@ type ReturnMessageBase = {
 
 type ReturnMessage =
   | (ReturnMessageBase & {
-      is_get_reply: true
-    })
+    is_get_reply: true
+  })
   | (ReturnMessageBase & {
-      is_observer_reply: true
-    })
+    is_observer_reply: true
+  })
   | (ReturnMessageBase & {
-      is_call_reply: true
-    })
+    is_call_reply: true
+  })
+
+
+type MidiPacket = {
+  pitch: number
+  velocity: number
+
+  polyKeyPressureKey: number
+  polyKeyPressureValue: number
+
+  controlChangeController: number
+  controlChangeValue: number
+
+  programChange: number
+  afterTouch: number,
+
+  pitchBend: number
+  midiChannel: number
+
+}
+
+type DeviceMidiPacket = {
+  deviceId: number
+} & MidiPacket
 
 export class Max4Node {
   private read: Socket | null = null
   private write: Socket | null = null
   private ports: Ports = {}
 
-  private incommingMessages = new Subject<ReturnMessage>()
+  private incomingMessages = new Subject<ReturnMessage>()
+  private midiSubject = new Subject<DeviceMidiPacket>()
 
   private callbacks = new Set<string>()
   private serviceId$ = new Subject<string>()
@@ -82,13 +108,18 @@ export class Max4Node {
     this.ports = ports
     this.read = this.createInputSocket(ports.receive)
     this.write = createSocket('udp4')
+    // this.setupMidiObservable()
   }
 
   private createInputSocket(port: number): Socket {
     const socket = createSocket('udp4')
     socket.bind(port)
     socket.on('message', (msg) => {
-      this.handleMessage(msg)
+      try {
+        this.handleMessage(msg)
+      } catch (e) {
+        console.error(e)
+      }
     })
     return socket
   }
@@ -100,6 +131,12 @@ export class Max4Node {
   private handleMessage(msg: Buffer) {
     const obj = osc.fromBuffer(msg)
 
+    if (!obj || !obj.address) {
+      console.log('Invalid message:', obj)
+      return
+    }
+
+
     const args = obj.args.map((item: any) => item.value)
     switch (obj.address) {
       case '/_get_reply':
@@ -108,7 +145,7 @@ export class Max4Node {
           callback: args[0],
           value: args.slice(1),
         } as ReturnMessage
-        this.incommingMessages.next(get_reply)
+        this.incomingMessages.next(get_reply)
         return
       case '/_observer_reply':
         // console.log(obj)
@@ -121,7 +158,7 @@ export class Max4Node {
           callback: args[0],
           value: args.slice(2),
         } as ReturnMessage
-        this.incommingMessages.next(obs_reply)
+        this.incomingMessages.next(obs_reply)
         return
       case '/_call_reply':
         const call_reply = {
@@ -129,7 +166,7 @@ export class Max4Node {
           callback: args[0],
           value: args.slice(1),
         } as ReturnMessage
-        this.incommingMessages.next(call_reply)
+        this.incomingMessages.next(call_reply)
         return
       case '/ping':
         this.send_message('pong', obj.args[0].value)
@@ -138,10 +175,58 @@ export class Max4Node {
         // console.log('service id:', obj.args[0].value)
         this.serviceId$.next(obj.args[0].value)
         break
+      case '/midi':
+        this.handleMidiMessage(args)
+        break
       default:
         console.log(obj)
         throw new Error('Unknown message type')
     }
+  }
+
+  private handleMidiMessage(args: any[]) {
+    const deviceId = args[0]
+    const pitch = args[1]
+    const velocity = args[2]
+
+
+    const polyKeyPressureKey = args[3]
+    const polyKeyPressureValue = args[4]
+
+    const controlChangeController = args[5]
+    const controlChangeValue = args[6]
+
+    const programChange = args[7]
+    const afterTouch = args[8]
+
+    const pitchBend = args[9]
+    const midiChannel = args[10]
+
+
+    // console.log('Received MIDI:', args)
+    this.midiSubject.next({ pitch, velocity, deviceId, afterTouch, controlChangeController, controlChangeValue, pitchBend, polyKeyPressureKey, polyKeyPressureValue, programChange, midiChannel })
+  }
+
+  public getMidiObservable(deviceId: number): Observable<Map<number, MidiPacket>> {
+    const activeNotes$ = this.midiSubject.pipe(
+      filter((midiMessage) => midiMessage.deviceId === deviceId),
+      scan((acc, midiMessage) => {
+
+        const { pitch, velocity, deviceId } = midiMessage
+
+
+        if (velocity > 0) {
+          acc.set(pitch, midiMessage)
+          return acc
+        } else {
+          acc.delete(pitch)
+          return acc
+        }
+      }, new Map<number, MidiPacket>()),
+    )
+
+
+    return activeNotes$
   }
 
   public send_message(address: string, args: any[]): void {
@@ -164,7 +249,7 @@ export class Max4Node {
       this.send_message(action, args)
     }
 
-    return this.incommingMessages.pipe(
+    return this.incomingMessages.pipe(
       filter((x) => x.callback === callback),
       map((x) => x.value),
       finalize(() => {
