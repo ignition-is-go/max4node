@@ -13,5 +13,8 @@
   "dependencies": {
     "osc-min": "^0.2.0",
     "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "^1.0.7"
   }
 }

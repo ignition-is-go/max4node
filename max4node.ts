@@ -1,6 +1,6 @@
 import { createSocket, Socket } from 'dgram'
+// @ts-ignore
 import * as osc from 'osc-min'
-import { send } from 'process'
 import {
   filter,
   finalize,
@@ -212,8 +212,7 @@ export class Max4Node {
       filter((midiMessage) => midiMessage.deviceId === deviceId),
       scan((acc, midiMessage) => {
 
-        const { pitch, velocity, deviceId } = midiMessage
-
+        const { pitch, velocity } = midiMessage
 
         if (velocity > 0) {
           acc.set(pitch, midiMessage)
