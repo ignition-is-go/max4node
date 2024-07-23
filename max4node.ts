@@ -207,7 +207,7 @@ export class Max4Node {
     this.midiSubject.next({ pitch, velocity, deviceId, afterTouch, controlChangeController, controlChangeValue, pitchBend, polyKeyPressureKey, polyKeyPressureValue, programChange, midiChannel })
   }
 
-  public getMidiObservable(deviceId: number): Observable<Map<number, MidiPacket>> {
+  public getActiveNotesObservable(deviceId: number): Observable<Map<number, MidiPacket>> {
     const activeNotes$ = this.midiSubject.pipe(
       filter((midiMessage) => midiMessage.deviceId === deviceId),
       scan((acc, midiMessage) => {
@@ -226,6 +226,12 @@ export class Max4Node {
 
 
     return activeNotes$
+  }
+
+  public getNoteEventsObservable(deviceId: number): Observable<MidiPacket> {
+    return this.midiSubject.pipe(
+      filter((midiMessage) => midiMessage.deviceId === deviceId),
+    )
   }
 
   public send_message(address: string, args: any[]): void {
